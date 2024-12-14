@@ -1,10 +1,13 @@
 from windscribe import Windscribe
 from utils.logger import Logger
+from typing import List
 import subprocess
 import time
 import random
 from decouple import config
 import os
+import re
+import asyncio
 
 logger = Logger().get_logger()
 
@@ -37,10 +40,10 @@ class WindscribeSingleton:
         self.connect()
         self.logger.info("Windscribe has been rebooted successfully")
 
-    def parse_status(self, output):
+    def parse_status(self, output: bytes):
         output_str = output.decode('utf-8').strip()
-        lines = output_str.split('\n')
-        status_dict = {}
+        lines: List[str] = output_str.split('\n')
+        status_dict: dict = {}
         for line in lines:
             if ':' in line:
                 key, value = line.split(':', 1)
@@ -76,3 +79,25 @@ class WindscribeSingleton:
         
         self.connected_states.append(state)
         self.logger.info("Successfully connected to Windscribe VPN")
+
+    async def aconnect(self, max_retries=15):
+        retries = 0
+        while retries < max_retries:
+            status = self.get_status()
+            state = status.get('Connect state', status.get('*Connect state'))
+            if state == "Connected":
+                print("VPN is connected.")
+                return
+            elif re.search(r"\bConnecting\b", state):
+                print("VPN is connecting. Waiting for it to complete...")
+                await asyncio.sleep(5)  # Wait for a few seconds before checking again
+            elif state in ["Disconnected", "Disconnecting"]:
+                print(f"VPN is {state}. Attempting to connect...")
+                self.vpn.connect(rand=True)
+                # subprocess.run(['windscribe-cli', 'connect'], check=True)
+                await asyncio.sleep(random.uniform(1, 3))
+            else:
+                print(f"Unexpected VPN state: {state}. Retrying...")
+                return
+            retries += 1
+        raise Exception("Failed to establish a VPN connection after multiple attempts.")
